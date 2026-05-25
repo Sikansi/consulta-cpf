@@ -123,57 +123,72 @@ def todos_esgotados() -> bool:
 # Normalização de resposta
 # ---------------------------------------------------------------------------
 
-def _get_campo(dados: dict, *chaves: str) -> Any:
-    for c in chaves:
-        v = dados.get(c)
-        if v not in (None, ""):
-            return v
-    return None
+_CAMPOS_BINARIOS = {
+    "comprovantePdf", "situacaoComprovantePdf", "situacaoComprovantePdf",
+    "pdf", "base64", "comprovantePdfBase64", "situacaoComprovantePdfBase64",
+}
+
+# Aliases: campo_padrao → possíveis nomes que a API pode retornar
+_ALIASES: dict[str, list[str]] = {
+    "cpf":        ["cpf", "CPF", "documento", "nr_cpf"],
+    "nome":       ["nome", "name", "NomePF", "nome_completo", "NomeCompleto"],
+    "nomeSocial": ["nomeSocial", "nome_social", "NomeSocial"],
+    "nascimento": ["nascimento", "data_nascimento", "DataNascimento", "dt_nascimento"],
+    "mae":        ["mae", "nome_mae", "NomeMae", "nomeMae", "mae_nome"],
+    "genero":     ["genero", "sexo", "gender", "Sexo"],
+    "situacao":   ["situacao", "situacaoCadastral", "SituacaoCadastral",
+                   "status_receita", "situacao_cadastral"],
+    "cidade":     ["cidade", "municipio", "Municipio", "city"],
+    "uf":         ["uf", "UF", "estado", "state", "sg_uf"],
+    "endereco":   ["endereco", "logradouro", "address", "Logradouro"],
+    "cep":        ["cep", "CEP"],
+    "bairro":     ["bairro", "neighborhood", "Bairro"],
+    "telefones":  ["telefones", "telefone", "phone", "Telefone"],
+    "emails":     ["emails", "email", "Email"],
+}
+
+
+def _valor_escalar(v: Any) -> str:
+    if isinstance(v, list):
+        partes = [str(i) for i in v if i not in (None, "")]
+        return ", ".join(partes)
+    if isinstance(v, dict):
+        return str(v)
+    return "" if v is None else str(v)
 
 
 def _normalizar(dados: dict[str, Any]) -> dict[str, Any]:
-    for campo_omitir in ("comprovantePdf", "situacaoComprovantePdf", "pdf", "base64"):
-        dados.pop(campo_omitir, None)
-
+    # 1. Copia todos os campos não-binários e não-dict como estão
     r: dict[str, Any] = {}
-    r["cpf"]         = _get_campo(dados, "cpf", "CPF", "documento") or ""
-    r["nome"]        = _get_campo(dados, "nome", "name", "NomePF") or ""
-    r["nomeSocial"]  = _get_campo(dados, "nomeSocial", "nome_social") or ""
-    r["nascimento"]  = _get_campo(dados, "nascimento", "data_nascimento", "DataNascimento") or ""
-    r["mae"]         = _get_campo(dados, "mae", "nome_mae", "NomeMae", "nomeMae") or ""
-    r["genero"]      = _get_campo(dados, "genero", "sexo", "gender") or ""
-    r["situacao"]    = _get_campo(dados, "situacao", "status_receita", "SituacaoCadastral", "situacao_cadastral") or ""
-    r["cidade"]      = _get_campo(dados, "cidade", "municipio", "Municipio", "city") or ""
-    r["uf"]          = _get_campo(dados, "uf", "estado", "UF", "state") or ""
-    r["endereco"]    = _get_campo(dados, "endereco", "logradouro", "address") or ""
-    r["cep"]         = _get_campo(dados, "cep", "CEP") or ""
-    r["bairro"]      = _get_campo(dados, "bairro", "neighborhood") or ""
-    r["telefones"]   = _get_campo(dados, "telefones", "telefone", "phone") or ""
-    r["emails"]      = _get_campo(dados, "emails", "email") or ""
-
-    for campo in ("telefones", "emails"):
-        if isinstance(r[campo], list):
-            r[campo] = ", ".join(str(v) for v in r[campo] if v)
-
-    # Remove vazios
-    r = {k: v for k, v in r.items() if v not in (None, "", [])}
-
-    # Preserva campos extras não-binários que possam ser úteis
-    campos_ja_mapeados = {
-        "cpf", "CPF", "nome", "name", "NomePF", "nomeSocial", "nome_social",
-        "nascimento", "data_nascimento", "DataNascimento", "mae", "nome_mae",
-        "NomeMae", "nomeMae", "genero", "sexo", "gender", "situacao",
-        "status_receita", "SituacaoCadastral", "situacao_cadastral", "cidade",
-        "municipio", "Municipio", "city", "uf", "estado", "UF", "state",
-        "endereco", "logradouro", "address", "cep", "CEP", "bairro",
-        "neighborhood", "telefones", "telefone", "phone", "emails", "email",
-        "status", "saldo", "delay", "consultaID", "pacoteUsado",
-    }
     for chave, valor in dados.items():
-        if chave not in campos_ja_mapeados and not isinstance(valor, (dict, list, bytes)):
-            r[chave] = valor
+        if chave in _CAMPOS_BINARIOS:
+            continue
+        if isinstance(valor, bytes):
+            continue
+        if isinstance(valor, dict):
+            # achata um nível de dicts simples (ex: {"nome": "X"})
+            for sub_k, sub_v in valor.items():
+                if not isinstance(sub_v, (dict, bytes)) and sub_k not in _CAMPOS_BINARIOS:
+                    r[f"{chave}.{sub_k}"] = _valor_escalar(sub_v)
+        elif isinstance(valor, list) and valor and isinstance(valor[0], dict):
+            r[chave] = " | ".join(
+                ", ".join(f"{k}={v}" for k, v in item.items()
+                          if k not in _CAMPOS_BINARIOS and not isinstance(v, (dict, list, bytes)))
+                for item in valor
+            )
+        else:
+            r[chave] = _valor_escalar(valor)
 
-    return r
+    # 2. Adiciona aliases normalizados se o campo padrão não existir diretamente
+    for campo_padrao, nomes_api in _ALIASES.items():
+        if campo_padrao not in r:
+            for nome in nomes_api:
+                if nome in r and r[nome] not in ("", None):
+                    r[campo_padrao] = r[nome]
+                    break
+
+    # Remove strings vazias
+    return {k: v for k, v in r.items() if v not in (None, "")}
 
 
 # ---------------------------------------------------------------------------

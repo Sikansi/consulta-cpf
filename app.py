@@ -38,7 +38,7 @@ texto = st.text_area(
 )
 
 col_btn, col_hint = st.columns([1, 5])
-consultar = col_btn.button("🔎 Consultar", type="primary", use_container_width=True)
+consultar = col_btn.button("🔎 Consultar", type="primary")
 col_hint.caption("Use `CPF|YYYY-MM-DD` para incluir data de nascimento (necessário para Consultar.io).")
 
 if consultar:
@@ -171,7 +171,7 @@ if resultados:
 
             st.dataframe(
                 df_show.style.apply(_estilizar, axis=1),
-                use_container_width=True,
+                width="stretch",
                 hide_index=True,
             )
 
@@ -184,3 +184,7 @@ if resultados:
             )
 
             st.caption(f"{len(resultados)} CPF(s) consultado(s).")
+
+        with st.expander("🔍 Ver resposta bruta (debug)"):
+            for r in resultados:
+                st.json(r)
