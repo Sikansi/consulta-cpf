@@ -104,10 +104,16 @@ with st.sidebar:
     todos_campos = st.session_state.get("campos_disponíveis", list(_CAMPOS_PADRAO))
     rotulos_map = {c: rotulo_campo(c) for c in todos_campos}
 
+    _opcoes_set = set(todos_campos)
+    _default_raw = st.session_state.get("campos_sel", [c for c in todos_campos if c in _CAMPOS_PADRAO])
+    _default_valido = [c for c in _default_raw if c in _opcoes_set]
+    if not _default_valido:
+        _default_valido = [c for c in todos_campos if c in _CAMPOS_PADRAO]
+
     campos_sel = st.multiselect(
         "Selecione as colunas",
         options=todos_campos,
-        default=st.session_state.get("campos_sel", [c for c in todos_campos if c in _CAMPOS_PADRAO]),
+        default=_default_valido,
         format_func=lambda c: rotulos_map.get(c, c),
     )
     st.session_state["campos_sel"] = campos_sel
